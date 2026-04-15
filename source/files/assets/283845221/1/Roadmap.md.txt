@@ -1,0 +1,85 @@
+Step-by-Step Implementation Roadmap
+Phase 1: Oimo.js Foundation
+What: Bridge the Oimo.js physics world with PlayCanvas entities.
+
+Initialize OIMO.World with gravity.
+
+Create a sync system so PlayCanvas entities follow Oimo rigid bodies.
+
+Cursor Prompt:
+
+"Initialize an OIMO.World in a script named physicsManager.js. Set gravity to -9.8 and implement an update loop that steps the world at 60fps. Create a sync function that maps Oimo body positions/rotations to PlayCanvas entities. Set up a static Oimo box for the ground."
+
+Phase 2: The Flick (Launch Mechanics)
+What: Convert 2D screen gestures into 3D physics impulses.
+
+Track pointer start/end coordinates and time.
+
+Calculate a 3D vector (X = horizontal, Y = lift, Z = power).
+
+Cursor Prompt:
+
+"In ballController.js, capture pointerdown and pointerup events. Calculate the swipe velocity and direction. Map this 2D swipe to a 3D impulse vector and apply it to an Oimo sphere body using body.applyImpulse upon release. Include a reset() function to return the ball to origin."
+
+Phase 3: The Curve (Magnus Effect)
+What: Calculate swipe curvature and apply lateral forces in flight.
+
+Detect the "arc" of the swipe during the gesture.
+
+Apply a continuous lateral force to the ball based on spin and velocity.
+
+Cursor Prompt:
+
+"Modify ballController.js to detect swipe curvature. Calculate a 'spin' value from the arc of the gesture. While the ball is in flight, apply a continuous horizontal force to the Oimo body in the update loop: Force = spin * forwardVelocity * sensitivity. Rotate the ball's mesh visually based on the spin."
+
+Phase 4: Scoring & Collisions
+What: Define the goal environment and hit detection.
+
+Create static Oimo boxes for posts and crossbars.
+
+Add non-colliding sensors for the net and bullseye targets.
+
+Cursor Prompt:
+
+"Set up the goal using static Oimo box bodies for posts and the crossbar. Place a non-colliding Oimo sensor body inside the net and over circular target entities. Implement a collision listener that fires a game:goal event when the ball hits the sensors, calculating if it hit the 'Top Bin' corners."
+
+Phase 5: Goalkeeper AI
+What: A kinematic obstacle that intercepts the ball.
+
+Calculate the ball's arrival point on the goal line.
+
+Move the keeper along the X-axis using interpolation.
+
+Cursor Prompt:
+
+"Create goalkeeperAI.js using a kinematic Oimo body. Once the ball is launched, predict its intersection with the goal's Z-plane. Use pc.math.lerp to move the keeper's X-position toward the intersection point. Add reactionDelay and speed attributes to tune the difficulty."
+
+Phase 6: Visual "Juice" & Feedback
+What: Enhance the player's sensory experience.
+
+Implement camera shakes and particle trails.
+
+Use time-scaling for dramatic finishes.
+
+Cursor Prompt:
+
+"Add visual polish:
+
+Camera Shake: Shake the camera on post/crossbar collisions.
+
+Ball Trail: Use pc.ParticleSystem to create a trail that scales with velocity.
+
+Slow Motion: Set app.timeScale = 0.3 briefly when a target is hit.
+
+Floating Text: Spawn a '+90' UI element at the point of impact."
+
+Phase 7: Game Session Loop
+What: Manage scores, lives, and resets.
+
+Track attempts and total points.
+
+Handle game-over and restart states.
+
+Cursor Prompt:
+
+"Create a gameManager.js to handle the session. Track 'Balls Left' and 'Total Score'. Deduct a life for misses/saves. When lives reach zero, show a 'Game Over' UI with a restart button that reloads the scene."
