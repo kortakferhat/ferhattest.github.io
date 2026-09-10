@@ -17,7 +17,20 @@ const TILE_H = 0.22;
 const ROLL_MS_TIP = 205; // upright -> flat (falls over)
 const ROLL_MS_RISE = 245; // flat -> upright (has to lift its mass)
 const ROLL_MS_SIDE = 170; // flat -> flat (light side roll)
-const SINK_MS = 520;
+// --- Sink (fall into the hole) ---
+// The brick tips over the lip, then free-falls: drop grows with t^2, i.e.
+// constant gravity. The fall is only "done" once the board has swallowed it
+// whole, plus a tail where it keeps dropping out of sight — nothing ever pops.
+const SINK_TIP_MS = 120; // loses its footing at the mouth
+const SINK_FALL_MS = 620; // free fall, ends the frame the brick is fully under
+const SINK_TAIL_MS = 170; // still falling, now out of sight
+const SINK_MS = SINK_TIP_MS + SINK_FALL_MS + SINK_TAIL_MS;
+const SINK_TIP_DROP = 0.16; // dip before gravity takes over (world units)
+const SINK_TILT = 0.13; // radians of topple on the way down
+/** Board surface — a sinking brick's clip plane rises to here so the floor eats it. */
+const SINK_CLIP_Y = TILE_H + 0.01;
+/** Clip-plane constant that parks a brick's plane far below the world (clips nothing). */
+const CLIP_PARKED = 1000;
 const NUDGE_MS = 190; // rejected-move bump
 const OUTLINE_PAD = 0.075; // white shell thickness around the selected brick (world units)
 const DEFAULT_TIME = 120;
@@ -129,6 +142,7 @@ function initThree() {
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.localClippingEnabled = true; // per-brick clip plane, used by sinkBlock
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.05;
@@ -321,7 +335,9 @@ function loadLevel(index) {
       studGroup: null,
       highlight: null,
       colors: null,
+      clipPlane: null,
       _reserve: null,
+      _sinkFx: null,
       _nudgeFx: null,
       _punchFx: null,
       _rejectFx: null,
@@ -522,23 +538,6 @@ function spawnShockwave(x, z, color, opts = {}) {
       disposeObject(ring);
     }
   );
-}
-
-/** Snapshot every fade-able material of a block (skips the solid white outline). */
-function fadeTargets(block) {
-  const list = [];
-  if (!block.mesh) return list;
-  block.mesh.traverse((o) => {
-    if (o.name === "outline") return;
-    const m = o.material;
-    if (!m || Array.isArray(m)) return;
-    list.push({ mat: m, base: m.opacity });
-  });
-  return list;
-}
-
-function setFade(list, k) {
-  for (const t of list) t.mat.opacity = t.base * k;
 }
 
 // --- Juice (CSS class hooks; no physics changes) ---
@@ -904,6 +903,20 @@ function createBlockMesh(b, colorIndex) {
   studGroup.visible = showStuds;
   group.add(studGroup);
 
+  // Every brick owns one clipping plane, parked far below the world so it clips
+  // nothing. sinkBlock() raises it to board level, so the floor swallows the
+  // brick as it drops instead of the brick sliding out from under the tile (the
+  // camera is top-down but still perspective, so off-centre holes would show it).
+  // Wired up here so the clipped shader variant compiles at level load, not mid-fall.
+  b.clipPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), CLIP_PARKED);
+  const clipPlanes = [b.clipPlane];
+  group.traverse((o) => {
+    const m = o.material;
+    if (!m || Array.isArray(m)) return;
+    m.clippingPlanes = clipPlanes;
+    m.clipShadows = true; // the cast shadow shrinks with the brick as it goes under
+  });
+
   scene.add(group);
   b.mesh = group;
   b.studGroup = studGroup;
@@ -1217,7 +1230,10 @@ function tryMove(dirName) {
     assertNoOverlaps("after-roll");
 
     if (isUprightInHole(block) && !holeOccupied(block.x, block.y, block.id)) {
-      sinkBlock(block);
+      // The win check rides on the fall: the level only clears once the brick
+      // has actually gone all the way down the hole.
+      sinkBlock(block, checkWin);
+      return;
     }
 
     checkWin();
@@ -1284,7 +1300,14 @@ function tintRejected(block) {
   );
 }
 
-function sinkBlock(block) {
+/**
+ * The brick loses its footing and drops straight down the hole under gravity.
+ * Its clip plane rises to board level for the fall, so the floor swallows it
+ * from the bottom up — the read is "falling into the void", not a shrink or a
+ * pop. `onComplete` runs only once the brick is all the way in, so the win /
+ * result screen never cuts the fall short.
+ */
+function sinkBlock(block, onComplete) {
   block.sunk = true;
   const hx = block.x;
   const hz = block.y;
@@ -1293,61 +1316,9 @@ function sinkBlock(block) {
   if (block.highlight) block.highlight.visible = false;
   setOutlineVisible(block, false);
 
-  if (block.mesh) {
-    const mesh = block.mesh;
-    if (block._punchFx) cancelFx(block._punchFx);
-    if (block._nudgeFx) cancelFx(block._nudgeFx);
-    mesh.scale.set(1, 1, 1);
-    const y0 = mesh.position.y;
-    const fades = fadeTargets(block);
-    for (const t of fades) {
-      if (!t.mat.transparent) {
-        t.mat.transparent = true;
-        t.mat.needsUpdate = true; // one-time recompile; the brick is gone after this
-      }
-    }
-    addFx(
-      SINK_MS,
-      (p) => {
-        // snaps down out of the hole mouth, then the tail eases out as it fades
-        const drop = 1 - Math.pow(1 - p, 2.4);
-        mesh.position.y = y0 - drop * 2.4;
-        const k = Math.max(0, 1 - p * 1.3);
-        const sc = 0.55 + 0.45 * k;
-        mesh.scale.set(sc, sc, sc);
-        setFade(fades, k);
-      },
-      () => {
-        mesh.visible = false;
-        mesh.position.y = TILE_H + 0.35;
-        mesh.scale.set(1, 1, 1);
-        setFade(fades, 1);
-      }
-    );
-  }
-
-  // Big, phone-legible impact: twin shockwaves + coloured debris + white sparks.
-  const puffY = TILE_H + 0.25;
-  spawnShockwave(hx, hz, PALETTE.holeGlow, { from: 0.5, to: 3.6, life: 640, opacity: 1 });
-  spawnBurst(hx, puffY, hz, colors.edge, 26, {
-    life: 720,
-    spread: 2.6,
-    up: 3.2,
-    gravity: 5.6,
-    size: 0.42,
-  });
-  spawnBurst(hx, puffY, hz, 0xffffff, 14, {
-    life: 500,
-    spread: 3.4,
-    up: 1.7,
-    gravity: 4.6,
-    size: 0.26,
-  });
-  window.setTimeout(() => {
-    if (scene) spawnShockwave(hx, hz, 0xffffff, { from: 0.4, to: 2.5, life: 480, opacity: 0.85 });
-  }, 110);
-  shakeStage("soft");
-  haptic([22, 40, 30]);
+  // Last brick down: stop the clock now, so the fall itself can never turn a
+  // solved board into a timeout.
+  if (blocks.every((b) => b.sunk)) timerRunning = false;
 
   // Auto-select next unsunk block
   if (selectedId === block.id) {
@@ -1356,8 +1327,105 @@ function sinkBlock(block) {
   }
   updateSelectionVisuals();
   updateHUD();
-  flashScreen("sink");
-  setStatus(`Sunk! ${sunkCount()}/${blocks.length}`, "info", 1600);
+
+  // The mouth reacts the instant the brick tips in; the big hit waits for the
+  // moment the board actually swallows it (swallowFx below).
+  spawnShockwave(hx, hz, PALETTE.holeGlow, { from: 0.45, to: 2.2, life: 400, opacity: 0.85 });
+  haptic(12);
+
+  /** Fired the frame the brick's top edge passes below the board surface. */
+  const swallowFx = () => {
+    const puffY = TILE_H + 0.25;
+    spawnShockwave(hx, hz, PALETTE.holeGlow, { from: 0.5, to: 3.6, life: 640, opacity: 1 });
+    spawnBurst(hx, puffY, hz, colors.edge, 26, {
+      life: 720,
+      spread: 2.6,
+      up: 3.2,
+      gravity: 5.6,
+      size: 0.42,
+    });
+    spawnBurst(hx, puffY, hz, 0xffffff, 14, {
+      life: 500,
+      spread: 3.4,
+      up: 1.7,
+      gravity: 4.6,
+      size: 0.26,
+    });
+    window.setTimeout(() => {
+      if (scene) spawnShockwave(hx, hz, 0xffffff, { from: 0.4, to: 2.5, life: 480, opacity: 0.85 });
+    }, 110);
+    shakeStage("soft");
+    haptic([22, 40, 30]);
+    flashScreen("sink");
+    setStatus(`Sunk! ${sunkCount()}/${blocks.length}`, "info", 1600);
+  };
+
+  if (!block.mesh) {
+    swallowFx();
+    if (onComplete) onComplete();
+    return;
+  }
+
+  const mesh = block.mesh;
+  if (block._punchFx) cancelFx(block._punchFx);
+  if (block._nudgeFx) cancelFx(block._nudgeFx);
+  if (block._sinkFx) cancelFx(block._sinkFx);
+  mesh.scale.set(1, 1, 1);
+
+  const y0 = mesh.position.y;
+  const q0 = mesh.quaternion.clone();
+  // Drop needed before the brick's top edge is under the board surface. Half of
+  // the 1.96-tall body plus its bevel, so this holds for any pose it sinks from.
+  const swallowDrop = Math.max(0.5, y0 + 1 - SINK_CLIP_Y);
+  // Which way it topples going over the lip — a few degrees, just enough to
+  // sell weight without ever hiding the brick's face from the top-down camera.
+  const tiltAxis = new THREE.Vector3(Math.random() * 2 - 1, 0, Math.random() * 2 - 1);
+  if (tiltAxis.lengthSq() < 1e-4) tiltAxis.set(1, 0, 0);
+  tiltAxis.normalize();
+  const tiltQ = new THREE.Quaternion();
+
+  if (block.clipPlane) block.clipPlane.constant = -SINK_CLIP_Y;
+  let swallowed = false;
+
+  block._sinkFx = addFx(
+    SINK_MS,
+    (p) => {
+      const t = p * SINK_MS;
+      let drop;
+      let tilt;
+      if (t < SINK_TIP_MS) {
+        // Tipping in: dips into the mouth, gravity has barely taken hold.
+        const k = t / SINK_TIP_MS;
+        drop = SINK_TIP_DROP * k * k;
+        tilt = SINK_TILT * 0.3 * k * k;
+      } else {
+        // Free fall — distance grows with t^2, i.e. constant gravity. k runs
+        // past 1 during the tail, so the brick keeps accelerating out of sight
+        // instead of stopping dead the moment it is hidden.
+        const k = (t - SINK_TIP_MS) / SINK_FALL_MS;
+        drop = SINK_TIP_DROP + (swallowDrop - SINK_TIP_DROP) * k * k;
+        tilt = SINK_TILT * Math.min(1, 0.3 + 0.7 * k);
+      }
+      mesh.position.y = y0 - drop;
+      tiltQ.setFromAxisAngle(tiltAxis, tilt);
+      mesh.quaternion.copy(tiltQ).multiply(q0);
+      if (!swallowed && drop >= swallowDrop) {
+        swallowed = true;
+        swallowFx();
+      }
+    },
+    (cancelled) => {
+      block._sinkFx = null;
+      if (block.clipPlane) block.clipPlane.constant = CLIP_PARKED;
+      mesh.visible = false;
+      mesh.position.y = y0;
+      mesh.quaternion.copy(q0);
+      mesh.scale.set(1, 1, 1);
+      if (cancelled) return; // level swapped out mid-fall — no win check
+      if (!swallowed) swallowFx();
+      if (onComplete) onComplete();
+    }
+  );
 }
 
 function checkWin() {
