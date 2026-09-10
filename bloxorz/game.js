@@ -96,8 +96,6 @@ let tiles = [];
 let cols = 0;
 let rows = 0;
 let holePositions = [];
-/** Holes that already ate a brick — keyed "x,y". Survives after the brick is despawned. */
-const filledHoles = new Set();
 /** @type {{ id:number, x:number, y:number, orient:string, sunk:boolean, mesh:THREE.Group|null, studGroup:THREE.Group|null, highlight:THREE.Mesh|null }[]} */
 let blocks = [];
 let selectedId = 0;
@@ -295,7 +293,6 @@ function clearBlocks() {
     }
   }
   blocks = [];
-  filledHoles.clear();
 }
 
 function loadLevel(index) {
@@ -1119,7 +1116,7 @@ function cellsOverlap(a, b) {
 
 /**
  * Cells occupied by every block except selfId.
- * Sunk blocks still own their hole cell — nothing may overlap them (no stacking).
+ * Sunk bricks are despawned and skipped — they must not ghost-collide.
  * While a block is rolling, both its from+to footprints are reserved.
  */
 function occupiedCells(exceptId) {
@@ -1147,12 +1144,6 @@ function poseOverlapsOccupied(proposed, exceptId) {
 
 function collidesWithOthers(proposed, selfId) {
   return poseOverlapsOccupied(proposed, selfId);
-}
-
-/** Hole already filled (a brick fell in) or currently stood on by a living brick. */
-function holeOccupied(x, y, exceptId) {
-  if (filledHoles.has(`${x},${y}`)) return true;
-  return occupiedCells(exceptId).some((c) => c.x === x && c.y === y);
 }
 
 /** True if any two blocks share a footprint cell. */
@@ -1225,8 +1216,6 @@ function tryMove(dirName) {
   const occ = occupiedCells(block.id);
   if (sweepCells.some((ca) => occ.some((cb) => ca.x === cb.x && ca.y === cb.y)))
     return rejectMove(block, dirName, "Blocked — no room to roll");
-  if (isUprightInHole(next) && holeOccupied(next.x, next.y, block.id))
-    return rejectMove(block, dirName, "That hole is taken");
 
   moves += 1;
   updateHUD();
@@ -1244,7 +1233,7 @@ function tryMove(dirName) {
     haptic(next.orient === "upright" ? 16 : 10);
     assertNoOverlaps("after-roll");
 
-    if (isUprightInHole(block) && !holeOccupied(block.x, block.y, block.id)) {
+    if (isUprightInHole(block)) {
       // The win check rides on the fall: the level only clears once the brick
       // has actually gone all the way down the hole.
       sinkBlock(block, checkWin);
@@ -1352,8 +1341,6 @@ function sinkBlock(block, onComplete) {
   const hx = block.x;
   const hz = block.y;
   const colors = block.colors || BLOCK_COLORS[0];
-  // Claim the hole immediately so nothing else can fall into it while we animate.
-  filledHoles.add(`${hx},${hz}`);
   block._reserve = null;
 
   if (block.highlight) block.highlight.visible = false;
