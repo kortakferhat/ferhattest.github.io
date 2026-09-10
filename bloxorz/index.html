@@ -42,28 +42,12 @@
       </div>
 
       <div class="controls">
-        <div class="controls-main">
-          <div class="controls-side">
-            <div class="toolbar">
-              <button type="button" class="btn" id="btn-restart">Restart</button>
-              <button type="button" class="btn" id="btn-studs" aria-pressed="false" title="Toggle brick studs">Studs: Off</button>
-              <button type="button" class="btn btn-primary" id="btn-howto">How to</button>
-            </div>
-            <p class="hint">Tap block · swipe to move · D-pad optional</p>
-          </div>
-
-          <div class="dpad" aria-label="Direction pad">
-            <div class="spacer"></div>
-            <button type="button" data-dir="up" aria-label="Up">▲</button>
-            <div class="spacer"></div>
-            <button type="button" data-dir="left" aria-label="Left">◀</button>
-            <div class="spacer"></div>
-            <button type="button" data-dir="right" aria-label="Right">▶</button>
-            <div class="spacer"></div>
-            <button type="button" data-dir="down" aria-label="Down">▼</button>
-            <div class="spacer"></div>
-          </div>
+        <div class="toolbar">
+          <button type="button" class="btn" id="btn-restart">Restart</button>
+          <button type="button" class="btn" id="btn-studs" aria-pressed="false" title="Toggle brick studs">Studs: Off</button>
+          <button type="button" class="btn btn-primary" id="btn-howto">How to</button>
         </div>
+        <p class="hint">Tap block · swipe to move</p>
       </div>
 
       <div id="fx-flash" aria-hidden="true"></div>
@@ -81,7 +65,7 @@
               <li>Upright covers 1 tile; flat covers 2. Only upright-in-hole counts as sunk.</li>
               <li><strong>No falling</strong> — moves off the board or onto empty space are rejected.</li>
               <li><strong>Timer</strong> defaults to 2:00. Timeout fails and restarts the level.</li>
-              <li>D-pad / arrows move the selected block. Tab or 1–9 to change selection.</li>
+              <li><strong>Tap</strong> a block to select it; <strong>swipe</strong> on the board to roll it.</li>
               <li>Optional <strong>Studs</strong> toggle (default off).</li>
             </ul>
             <div class="legend">

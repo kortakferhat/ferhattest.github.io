@@ -200,25 +200,10 @@ body {
 
 .controls {
   flex: 0 0 auto;
-  padding: 6px 8px 6px;
+  padding: 4px 8px 4px;
   display: flex;
   flex-direction: column;
-  gap: 0;
-}
-
-.controls-main {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-.controls-side {
-  flex: 1 1 auto;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
+  gap: 2px;
 }
 
 .toolbar {
@@ -261,44 +246,6 @@ body {
   border-color: rgba(30, 144, 255, 0.55);
   background: rgba(30, 144, 255, 0.22);
   color: #7ec8ff;
-}
-
-.dpad {
-  flex: 0 0 auto;
-  display: grid;
-  grid-template-columns: var(--touch) var(--touch) var(--touch);
-  grid-template-rows: var(--touch) var(--touch) var(--touch);
-  gap: 4px;
-  justify-content: center;
-  margin: 0;
-  user-select: none;
-}
-
-.dpad .spacer {
-  pointer-events: none;
-}
-
-.dpad button {
-  width: var(--touch);
-  height: var(--touch);
-  border-radius: 10px;
-  border: 2px solid rgba(245, 197, 24, 0.35);
-  background: linear-gradient(180deg, #e31c23, #b01419);
-  color: #fff;
-  font-size: 1rem;
-  font-weight: 700;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  touch-action: manipulation;
-  box-shadow: 0 3px 0 #6e0c10;
-}
-
-.dpad button:active {
-  transform: translateY(2px);
-  box-shadow: 0 2px 0 #6e0c10;
-  background: linear-gradient(180deg, #c4181e, #9a1116);
 }
 
 .hint {
@@ -548,12 +495,6 @@ body {
   transform: translateY(2px) scale(0.97);
   box-shadow: 0 1px 0 rgba(0, 0, 0, 0.35);
   filter: brightness(1.12);
-}
-
-.dpad button.is-pressed {
-  transform: translateY(3px) scale(0.95);
-  box-shadow: 0 1px 0 #6e0c10;
-  filter: brightness(1.15);
 }
 
 /* Status line pops when it changes, so a repeated "Blocked" still registers */

@@ -1724,63 +1724,12 @@ function pickBlockAt(clientX, clientY) {
   return best;
 }
 
-// --- Controls ---
-const keyMap = {
-  ArrowUp: "up",
-  ArrowDown: "down",
-  ArrowLeft: "left",
-  ArrowRight: "right",
-  w: "up",
-  s: "down",
-  a: "left",
-  d: "right",
-  W: "up",
-  S: "down",
-  A: "left",
-  D: "right",
-};
-
-window.addEventListener("keydown", (e) => {
-  if (howto && !howto.classList.contains("hidden")) return;
-  if (elResult && !elResult.classList.contains("hidden")) return;
-  const dir = keyMap[e.key];
-  if (dir) {
-    e.preventDefault();
-    tryMove(dir);
-  }
-  if (e.key === "r" || e.key === "R") {
-    e.preventDefault();
-    hardRestart();
-  }
-  // Tab / number keys to cycle selection
-  if (e.key === "Tab") {
-    e.preventDefault();
-    const active = blocks.filter((b) => !b.sunk);
-    if (!active.length) return;
-    const idx = active.findIndex((b) => b.id === selectedId);
-    const next = active[(idx + 1) % active.length];
-    selectBlock(next.id);
-  }
-  if (e.key >= "1" && e.key <= "9") {
-    const id = parseInt(e.key, 10) - 1;
-    selectBlock(id);
-  }
-});
-
-document.querySelectorAll("[data-dir]").forEach((btn) => {
-  const fire = (e) => {
-    e.preventDefault();
-    tryMove(btn.getAttribute("data-dir"));
-  };
-  btn.addEventListener("pointerdown", fire);
-});
-
+// --- Controls (pointer / touch only) ---
 let touchStart = null;
 const SWIPE_MIN = 28;
 
 function onPointerDown(e) {
   if (
-    e.target.closest(".dpad") ||
     e.target.closest(".toolbar") ||
     e.target.closest(".sheet") ||
     e.target.closest(".overflow") ||
@@ -1891,7 +1840,7 @@ if (btnResultCta) {
   });
 }
 
-// Stronger press feedback on buttons / d-pad
+// Stronger press feedback on toolbar buttons
 function wirePressFeedback(root) {
   root.querySelectorAll("button").forEach((btn) => {
     const down = () => btn.classList.add("is-pressed");
