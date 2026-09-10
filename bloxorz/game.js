@@ -96,6 +96,8 @@ let tiles = [];
 let cols = 0;
 let rows = 0;
 let holePositions = [];
+/** Holes that already ate a brick — keyed "x,y". Survives after the brick is despawned. */
+const filledHoles = new Set();
 /** @type {{ id:number, x:number, y:number, orient:string, sunk:boolean, mesh:THREE.Group|null, studGroup:THREE.Group|null, highlight:THREE.Mesh|null }[]} */
 let blocks = [];
 let selectedId = 0;
@@ -286,6 +288,7 @@ function clearBlocks() {
     }
   }
   blocks = [];
+  filledHoles.clear();
 }
 
 function loadLevel(index) {
@@ -1119,6 +1122,8 @@ function occupiedCells(exceptId) {
   };
   for (const o of blocks) {
     if (o.id === exceptId) continue;
+    // Sunk bricks are gone — they must not ghost-collide. Filled holes are tracked separately.
+    if (o.sunk) continue;
     pushFoot(o);
     if (o._reserve) {
       for (const c of o._reserve) cells.push({ x: c.x, y: c.y, id: o.id });
@@ -1137,15 +1142,18 @@ function collidesWithOthers(proposed, selfId) {
   return poseOverlapsOccupied(proposed, selfId);
 }
 
-/** Hole already occupied by a sunk block (or any block standing there). */
+/** Hole already filled (a brick fell in) or currently stood on by a living brick. */
 function holeOccupied(x, y, exceptId) {
+  if (filledHoles.has(`${x},${y}`)) return true;
   return occupiedCells(exceptId).some((c) => c.x === x && c.y === y);
 }
 
 /** True if any two blocks share a footprint cell. */
 function findOverlapPair() {
   for (let i = 0; i < blocks.length; i++) {
+    if (blocks[i].sunk) continue;
     for (let j = i + 1; j < blocks.length; j++) {
+      if (blocks[j].sunk) continue;
       if (cellsOverlap(blocks[i], blocks[j])) return [blocks[i], blocks[j]];
     }
   }
@@ -1307,11 +1315,39 @@ function tintRejected(block) {
  * pop. `onComplete` runs only once the brick is all the way in, so the win /
  * result screen never cuts the fall short.
  */
+
+/** Fully remove a sunk brick from the scene so it cannot ghost-collide or linger. */
+function despawnBlock(block) {
+  if (!block) return;
+  block.sunk = true;
+  block._reserve = null;
+  if (block._sinkFx) cancelFx(block._sinkFx);
+  if (block._nudgeFx) cancelFx(block._nudgeFx);
+  if (block._punchFx) cancelFx(block._punchFx);
+  if (block._rejectFx) cancelFx(block._rejectFx);
+  block._sinkFx = block._nudgeFx = block._punchFx = block._rejectFx = null;
+  if (block.highlight) {
+    scene.remove(block.highlight);
+    disposeObject(block.highlight);
+    block.highlight = null;
+  }
+  if (block.mesh) {
+    scene.remove(block.mesh);
+    disposeObject(block.mesh);
+    block.mesh = null;
+  }
+  block.studGroup = null;
+  block.clipPlane = null;
+}
+
 function sinkBlock(block, onComplete) {
   block.sunk = true;
   const hx = block.x;
   const hz = block.y;
   const colors = block.colors || BLOCK_COLORS[0];
+  // Claim the hole immediately so nothing else can fall into it while we animate.
+  filledHoles.add(`${hx},${hz}`);
+  block._reserve = null;
 
   if (block.highlight) block.highlight.visible = false;
   setOutlineVisible(block, false);
@@ -1362,6 +1398,7 @@ function sinkBlock(block, onComplete) {
 
   if (!block.mesh) {
     swallowFx();
+    despawnBlock(block);
     if (onComplete) onComplete();
     return;
   }
@@ -1416,13 +1453,14 @@ function sinkBlock(block, onComplete) {
     },
     (cancelled) => {
       block._sinkFx = null;
-      if (block.clipPlane) block.clipPlane.constant = CLIP_PARKED;
-      mesh.visible = false;
-      mesh.position.y = y0;
-      mesh.quaternion.copy(q0);
-      mesh.scale.set(1, 1, 1);
-      if (cancelled) return; // level swapped out mid-fall — no win check
+      if (cancelled) {
+        // Level tear-down mid-fall — still scrub the ghost so it cannot linger.
+        despawnBlock(block);
+        return;
+      }
       if (!swallowed) swallowFx();
+      // Brick is fully under the board: destroy it so it cannot cause ghost bugs.
+      despawnBlock(block);
       if (onComplete) onComplete();
     }
   );
