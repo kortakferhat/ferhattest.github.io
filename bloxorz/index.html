@@ -37,30 +37,33 @@
       <div class="stage-wrap">
         <div id="stage">
           <canvas id="game" aria-label="Bloxorz 3D playfield"></canvas>
+          <div id="status" class="status" aria-live="polite"></div>
         </div>
-        <div id="status" class="status" aria-live="polite"></div>
       </div>
 
       <div class="controls">
-        <div class="toolbar">
-          <button type="button" class="btn" id="btn-restart">Restart</button>
-          <button type="button" class="btn" id="btn-studs" aria-pressed="false" title="Toggle brick studs">Studs: Off</button>
-          <button type="button" class="btn btn-primary" id="btn-howto">How to play</button>
-        </div>
+        <div class="controls-main">
+          <div class="controls-side">
+            <div class="toolbar">
+              <button type="button" class="btn" id="btn-restart">Restart</button>
+              <button type="button" class="btn" id="btn-studs" aria-pressed="false" title="Toggle brick studs">Studs: Off</button>
+              <button type="button" class="btn btn-primary" id="btn-howto">How to</button>
+            </div>
+            <p class="hint">Tap block · swipe to move · D-pad optional</p>
+          </div>
 
-        <div class="dpad" aria-label="Direction pad">
-          <div class="spacer"></div>
-          <button type="button" data-dir="up" aria-label="Up">▲</button>
-          <div class="spacer"></div>
-          <button type="button" data-dir="left" aria-label="Left">◀</button>
-          <div class="spacer"></div>
-          <button type="button" data-dir="right" aria-label="Right">▶</button>
-          <div class="spacer"></div>
-          <button type="button" data-dir="down" aria-label="Down">▼</button>
-          <div class="spacer"></div>
+          <div class="dpad" aria-label="Direction pad">
+            <div class="spacer"></div>
+            <button type="button" data-dir="up" aria-label="Up">▲</button>
+            <div class="spacer"></div>
+            <button type="button" data-dir="left" aria-label="Left">◀</button>
+            <div class="spacer"></div>
+            <button type="button" data-dir="right" aria-label="Right">▶</button>
+            <div class="spacer"></div>
+            <button type="button" data-dir="down" aria-label="Down">▼</button>
+            <div class="spacer"></div>
+          </div>
         </div>
-
-        <p class="hint">Tap a block to select · Swipe that block · D-pad / keys move selected · R restart</p>
       </div>
 
       <div id="fx-flash" aria-hidden="true"></div>

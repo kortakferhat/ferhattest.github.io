@@ -202,12 +202,19 @@ function fitCamera() {
   if (!cols || !rows) return;
   const cx = (cols - 1) / 2;
   const cz = (rows - 1) / 2;
-  const span = Math.max(cols, rows);
+  camera.fov = 40;
+  const pad = 1.35;
+  const fovRad = (camera.fov * Math.PI) / 180;
+  const halfTan = Math.tan(fovRad / 2);
+  const aspect = camera.aspect || 1;
+  const needZ = rows + pad;
+  const needX = cols + pad;
+  const heightForRows = needZ / (2 * halfTan);
+  const heightForCols = needX / (2 * halfTan * aspect);
+  const height = Math.max(heightForRows, heightForCols, 8);
   // Straight top-down (no isometric) — swipe maps 1:1 to grid
-  const height = span * 1.35 + 5.5;
   camera.position.set(cx, height, cz + 0.01);
   camera.lookAt(cx, 0, cz);
-  camera.fov = 40;
   camera.updateProjectionMatrix();
   dirLight.position.set(cx + 4, height * 0.9, cz + 5);
   dirLight.target.position.set(cx, 0, cz);
