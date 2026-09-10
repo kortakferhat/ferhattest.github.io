@@ -1104,6 +1104,10 @@ function tileAt(x, y) {
   return tiles[y][x];
 }
 
+function isHoleCell(x, y) {
+  return tileAt(x, y) === 2;
+}
+
 function isSupported(b) {
   return footprint(b).every((c) => tileAt(c.x, c.y) !== 0);
 }
@@ -1121,16 +1125,20 @@ function cellsOverlap(a, b) {
  */
 function occupiedCells(exceptId) {
   const cells = [];
+  const pushCell = (x, y, id) => {
+    if (isHoleCell(x, y)) return;
+    cells.push({ x, y, id });
+  };
   const pushFoot = (b) => {
-    for (const c of footprint(b)) cells.push({ x: c.x, y: c.y, id: b.id });
+    for (const c of footprint(b)) pushCell(c.x, c.y, b.id);
   };
   for (const o of blocks) {
     if (o.id === exceptId) continue;
-    // Sunk bricks are gone — they must not ghost-collide. Filled holes are tracked separately.
+    // Sunk bricks are despawned — they must not ghost-collide.
     if (o.sunk) continue;
     pushFoot(o);
     if (o._reserve) {
-      for (const c of o._reserve) cells.push({ x: c.x, y: c.y, id: o.id });
+      for (const c of o._reserve) pushCell(c.x, c.y, o.id);
     }
   }
   return cells;
@@ -1139,7 +1147,10 @@ function occupiedCells(exceptId) {
 function poseOverlapsOccupied(proposed, exceptId) {
   const foot = footprint(proposed);
   const occ = occupiedCells(exceptId);
-  return foot.some((ca) => occ.some((cb) => ca.x === cb.x && ca.y === cb.y));
+  return foot.some((ca) => {
+    if (isHoleCell(ca.x, ca.y)) return false;
+    return occ.some((cb) => ca.x === cb.x && ca.y === cb.y);
+  });
 }
 
 function collidesWithOthers(proposed, selfId) {
@@ -1207,15 +1218,21 @@ function tryMove(dirName) {
   const from = { x: block.x, y: block.y, orient: block.orient };
   const next = roll(block, dir);
 
-  // Reject invalid: off-board / unsupported / collision / taken hole.
+  // Reject invalid: off-board / unsupported / solid-tile brick collision.
   // Every rejection gets the same loud feedback so the rule is never a silent no-op.
+  const sinkingIntoHole = isUprightInHole(next);
   if (!isSupported(next)) return rejectMove(block, dirName, "Blocked — no floor there");
-  if (collidesWithOthers(next, block.id)) return rejectMove(block, dirName, "Blocked — brick in the way");
-  // Sweep: from∪to must not clip through another block mid-roll
+  if (!sinkingIntoHole && collidesWithOthers(next, block.id))
+    return rejectMove(block, dirName, "Blocked — brick in the way");
+  // Sweep: from∪to must not clip through another block mid-roll (hole cells never block).
   const sweepCells = [...footprint(from), ...footprint(next)];
   const occ = occupiedCells(block.id);
-  if (sweepCells.some((ca) => occ.some((cb) => ca.x === cb.x && ca.y === cb.y)))
-    return rejectMove(block, dirName, "Blocked — no room to roll");
+  const sweepBlocked = sweepCells.some((ca) => {
+    if (isHoleCell(ca.x, ca.y)) return false;
+    if (sinkingIntoHole && ca.x === next.x && ca.y === next.y) return false;
+    return occ.some((cb) => ca.x === cb.x && ca.y === cb.y);
+  });
+  if (sweepBlocked) return rejectMove(block, dirName, "Blocked — no room to roll");
 
   moves += 1;
   updateHUD();
