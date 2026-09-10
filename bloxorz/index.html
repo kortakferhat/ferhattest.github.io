@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover"
+    />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="theme-color" content="#1a1f36" />
+    <title>Bloxorz 3D — Brick Edition</title>
+    <link rel="stylesheet" href="styles.css" />
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://unpkg.com/three@0.170.0/build/three.module.js",
+          "three/addons/": "https://unpkg.com/three@0.170.0/examples/jsm/"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <div class="app" id="app">
+      <header class="topbar">
+        <div class="brand">Bloxorz · Bricks</div>
+        <div class="hud">
+          <div id="level-label">Level 1</div>
+          <div class="hud-row">
+            <span id="timer-label" class="timer">2:00</span>
+            <span id="blocks-label">Blocks: 2/2</span>
+            <span id="moves-label">Moves: 0</span>
+          </div>
+        </div>
+      </header>
+
+      <div class="stage-wrap">
+        <div id="stage">
+          <canvas id="game" aria-label="Bloxorz 3D playfield"></canvas>
+        </div>
+        <div id="status" class="status" aria-live="polite"></div>
+      </div>
+
+      <div class="controls">
+        <div class="toolbar">
+          <button type="button" class="btn" id="btn-restart">Restart</button>
+          <button type="button" class="btn" id="btn-studs" aria-pressed="false" title="Toggle brick studs">Studs: Off</button>
+          <button type="button" class="btn btn-primary" id="btn-howto">How to play</button>
+        </div>
+
+        <div class="dpad" aria-label="Direction pad">
+          <div class="spacer"></div>
+          <button type="button" data-dir="up" aria-label="Up">▲</button>
+          <div class="spacer"></div>
+          <button type="button" data-dir="left" aria-label="Left">◀</button>
+          <div class="spacer"></div>
+          <button type="button" data-dir="right" aria-label="Right">▶</button>
+          <div class="spacer"></div>
+          <button type="button" data-dir="down" aria-label="Down">▼</button>
+          <div class="spacer"></div>
+        </div>
+
+        <p class="hint">Tap a block to select · Swipe that block · D-pad / keys move selected · R restart</p>
+      </div>
+
+      <div id="howto" class="howto hidden" role="dialog" aria-labelledby="howto-title">
+        <div class="howto-card">
+          <h2 id="howto-title">How to play</h2>
+          <div class="howto-body">
+            <p>
+              Roll each <strong>1×1×2 brick</strong> into a hole <strong>while upright</strong>.
+              Sink <strong>every</strong> block before the timer runs out.
+            </p>
+            <ul>
+              <li><strong>Multiple blocks</strong> — tap or swipe the brick you want to move.</li>
+              <li>Upright covers 1 tile; flat covers 2. Only upright-in-hole counts as sunk.</li>
+              <li><strong>No falling</strong> — moves off the board or onto empty space are rejected.</li>
+              <li><strong>Timer</strong> defaults to 2:00. Timeout fails and restarts the level.</li>
+              <li>D-pad / arrows move the selected block. Tab or 1–9 to change selection.</li>
+              <li>Optional <strong>Studs</strong> toggle (default off).</li>
+            </ul>
+            <div class="legend">
+              <span class="chip"><span class="swatch tile"></span> Tile</span>
+              <span class="chip"><span class="swatch block"></span> Block</span>
+              <span class="chip"><span class="swatch hole"></span> Hole</span>
+            </div>
+          </div>
+          <button type="button" class="btn btn-primary" id="howto-close" style="width: 100%">
+            Got it — play
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <script src="levels.js"></script>
+    <script type="module" src="game.js"></script>
+  </body>
+</html>
