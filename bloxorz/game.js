@@ -13,7 +13,13 @@ const DIRS = {
 };
 
 const TILE_H = 0.22;
-const ROLL_MS = 220;
+/** Roll timings by move type — tipping over is heavier than standing up. */
+const ROLL_MS_TIP = 205; // upright -> flat (falls over)
+const ROLL_MS_RISE = 245; // flat -> upright (has to lift its mass)
+const ROLL_MS_SIDE = 170; // flat -> flat (light side roll)
+const SINK_MS = 520;
+const NUDGE_MS = 190; // rejected-move bump
+const OUTLINE_PAD = 0.075; // white shell thickness around the selected brick (world units)
 const DEFAULT_TIME = 120;
 
 const BLOCK_COLORS = [
@@ -38,6 +44,9 @@ const PALETTE = {
   stud: 0xe8b410,
   select: 0xffffff,
 };
+
+/** Tint used for rejected-move feedback on the outline / footprint ring. */
+const REJECT_COLOR = new THREE.Color(0xff3b3b);
 
 let showStuds = false;
 
@@ -242,7 +251,8 @@ function parseLevel(level) {
 function disposeObject(obj) {
   if (!obj) return;
   obj.traverse((o) => {
-    if (o.geometry) o.geometry.dispose();
+    // Footprint outlines share cached geometry across blocks/levels — never dispose those.
+    if (o.geometry && !o.geometry.userData.shared) o.geometry.dispose();
     if (o.material) {
       if (Array.isArray(o.material)) o.material.forEach((m) => m.dispose());
       else o.material.dispose();
@@ -270,6 +280,7 @@ function loadLevel(index) {
   const starts = parseLevel(level);
 
   clearPivot();
+  clearFx();
   clearBlocks();
   anim = null;
   animating = false;
@@ -309,7 +320,11 @@ function loadLevel(index) {
       mesh: null,
       studGroup: null,
       highlight: null,
+      colors: null,
       _reserve: null,
+      _nudgeFx: null,
+      _punchFx: null,
+      _rejectFx: null,
     };
     createBlockMesh(b, i);
     placeBlock(b);
@@ -362,30 +377,203 @@ function updateHUD() {
   }
 }
 
-function setStatus(msg, kind) {
+let statusToken = 0;
+
+function setStatus(msg, kind, autoClearMs) {
   if (!elStatus) return;
+  const token = ++statusToken;
   elStatus.textContent = msg || "";
+  elStatus.className = "status sr-status";
+  // reflow so a repeat of the same status re-runs its pop animation
+  void elStatus.offsetWidth;
   elStatus.className = "status sr-status" + (kind ? " " + kind : "");
+  if (autoClearMs) {
+    window.setTimeout(() => {
+      if (token === statusToken) setStatus("");
+    }, autoClearMs);
+  }
+}
+
+// --- FX runner (time-based, independent of gameplay animation) ---
+/** @type {{t0:number,dur:number,update:(p:number)=>void,end:(cancelled:boolean)=>void}[]} */
+const fxList = [];
+
+function addFx(dur, update, end) {
+  const item = { t0: performance.now(), dur: Math.max(1, dur), update, end };
+  fxList.push(item);
+  return item;
+}
+
+function updateFx(now) {
+  for (let i = fxList.length - 1; i >= 0; i--) {
+    const f = fxList[i];
+    const p = Math.min(1, (now - f.t0) / f.dur);
+    f.update(p);
+    if (p >= 1) {
+      fxList.splice(i, 1);
+      if (f.end) f.end(false);
+    }
+  }
+}
+
+/** Stop one running FX early (its end handler still runs, flagged as cancelled). */
+function cancelFx(item) {
+  const i = fxList.indexOf(item);
+  if (i === -1) return;
+  fxList.splice(i, 1);
+  if (item.end) item.end(true);
+}
+
+function clearFx() {
+  while (fxList.length) {
+    const f = fxList.pop();
+    if (f.end) f.end(true);
+  }
+}
+
+function haptic(pattern) {
+  try {
+    if (navigator.vibrate) navigator.vibrate(pattern);
+  } catch (_) {}
+}
+
+/**
+ * Short-lived particle puff. One THREE.Points per burst, disposed when done —
+ * counts stay small so this is cheap on phones.
+ */
+function spawnBurst(x, y, z, color, count, opts = {}) {
+  const life = opts.life ?? 620;
+  const spread = opts.spread ?? 1.5;
+  const up = opts.up ?? 2.2;
+  const gravity = opts.gravity ?? 5.4;
+  const pos = new Float32Array(count * 3);
+  const vel = new Float32Array(count * 3);
+  for (let i = 0; i < count; i++) {
+    const a = Math.random() * Math.PI * 2;
+    const r = spread * (0.35 + Math.random() * 0.65);
+    pos[i * 3] = x;
+    pos[i * 3 + 1] = y;
+    pos[i * 3 + 2] = z;
+    vel[i * 3] = Math.cos(a) * r;
+    vel[i * 3 + 1] = up * (0.45 + Math.random() * 0.85);
+    vel[i * 3 + 2] = Math.sin(a) * r;
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+  const mat = new THREE.PointsMaterial({
+    color,
+    size: opts.size ?? 0.17,
+    transparent: true,
+    opacity: 1,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+  });
+  const pts = new THREE.Points(geo, mat);
+  pts.frustumCulled = false;
+  scene.add(pts);
+
+  const arr = geo.attributes.position.array;
+  addFx(
+    life,
+    (p) => {
+      const t = p * (life / 1000);
+      for (let i = 0; i < count; i++) {
+        arr[i * 3] = x + vel[i * 3] * t;
+        arr[i * 3 + 1] = y + vel[i * 3 + 1] * t - 0.5 * gravity * t * t;
+        arr[i * 3 + 2] = z + vel[i * 3 + 2] * t;
+      }
+      geo.attributes.position.needsUpdate = true;
+      mat.opacity = 1 - p * p;
+    },
+    () => {
+      scene.remove(pts);
+      disposeObject(pts);
+    }
+  );
+}
+
+/** Expanding shockwave ring on the board plane. */
+function spawnShockwave(x, z, color, opts = {}) {
+  const mat = new THREE.MeshBasicMaterial({
+    color,
+    transparent: true,
+    opacity: opts.opacity ?? 0.95,
+    side: THREE.DoubleSide,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+  });
+  const ring = new THREE.Mesh(new THREE.RingGeometry(0.32, 0.46, 32), mat);
+  ring.rotation.x = -Math.PI / 2;
+  ring.position.set(x, TILE_H + 0.07, z);
+  scene.add(ring);
+  const to = opts.to ?? 2.8;
+  const from = opts.from ?? 0.55;
+  const base = mat.opacity;
+  addFx(
+    opts.life ?? 560,
+    (p) => {
+      // ring is rotated -90deg about X, so local X/Y are the world ground plane
+      const s = from + (to - from) * (1 - Math.pow(1 - p, 2));
+      ring.scale.set(s, s, 1);
+      mat.opacity = base * (1 - p) * (1 - p);
+    },
+    () => {
+      scene.remove(ring);
+      disposeObject(ring);
+    }
+  );
+}
+
+/** Snapshot every fade-able material of a block (skips the solid white outline). */
+function fadeTargets(block) {
+  const list = [];
+  if (!block.mesh) return list;
+  block.mesh.traverse((o) => {
+    if (o.name === "outline") return;
+    const m = o.material;
+    if (!m || Array.isArray(m)) return;
+    list.push({ mat: m, base: m.opacity });
+  });
+  return list;
+}
+
+function setFade(list, k) {
+  for (const t of list) t.mat.opacity = t.base * k;
 }
 
 // --- Juice (CSS class hooks; no physics changes) ---
+const FLASH_KINDS = ["sink", "fail", "win", "reject"];
+let flashToken = 0;
+
 function flashScreen(kind = "sink") {
   if (!elFxFlash) return;
-  elFxFlash.classList.remove("on", "sink", "fail", "win");
+  const token = ++flashToken;
+  elFxFlash.classList.remove("on", ...FLASH_KINDS);
   // reflow so animation restarts
   void elFxFlash.offsetWidth;
   elFxFlash.classList.add("on", kind);
   window.setTimeout(() => {
-    elFxFlash.classList.remove("on", "sink", "fail", "win");
-  }, 380);
+    // a newer flash may have started; only the latest one clears
+    if (token === flashToken) elFxFlash.classList.remove("on", ...FLASH_KINDS);
+  }, 420);
 }
 
-function shakeStage() {
+let shakeToken = 0;
+
+/** kind: "hard" (fail) | "soft" (blocked move / sink thud) */
+function shakeStage(kind = "hard") {
   if (!stage) return;
-  stage.classList.remove("fx-shake");
+  const cls = kind === "soft" ? "fx-shake-soft" : "fx-shake";
+  const token = ++shakeToken;
+  stage.classList.remove("fx-shake", "fx-shake-soft");
   void stage.offsetWidth;
-  stage.classList.add("fx-shake");
-  window.setTimeout(() => stage.classList.remove("fx-shake"), 450);
+  stage.classList.add(cls);
+  window.setTimeout(
+    () => {
+      if (token === shakeToken) stage.classList.remove("fx-shake", "fx-shake-soft");
+    },
+    kind === "soft" ? 300 : 460
+  );
 }
 
 function celebratePulse() {
@@ -416,15 +604,67 @@ function showResult({ title, sub, cta, kind, action }) {
   elResult.classList.remove("hidden");
 }
 
-function impactPunch(block) {
+/** Damped squash-and-stretch when a brick lands. Runs on the FX clock, not a timeout. */
+function impactPunch(block, strength = 1) {
   if (!block || !block.mesh || block.sunk) return;
-  block.mesh.scale.set(1.07, 0.93, 1.07);
-  window.setTimeout(() => {
-    if (block.mesh && block.mesh.visible && !block.sunk) {
-      block.mesh.scale.set(1, 1, 1);
+  const mesh = block.mesh;
+  if (block._punchFx) cancelFx(block._punchFx);
+  const amp = 0.085 * strength;
+  block._punchFx = addFx(
+    190,
+    (p) => {
+      if (block.sunk || !mesh.visible) return;
+      const k = (1 - p) * (1 - p) * Math.cos(p * 9);
+      mesh.scale.set(1 + amp * k, 1 - amp * k, 1 + amp * k);
+    },
+    () => {
+      block._punchFx = null;
+      if (!block.sunk) mesh.scale.set(1, 1, 1);
     }
-  }, 75);
+  );
 }
+
+/** Rounded-rect path used for both the footprint outline and its glow fill. */
+function roundedRectShape(w, h, r) {
+  const hw = w / 2;
+  const hh = h / 2;
+  const rad = Math.min(r, hw, hh);
+  const sh = new THREE.Shape();
+  sh.moveTo(-hw + rad, -hh);
+  sh.lineTo(hw - rad, -hh);
+  sh.absarc(hw - rad, -hh + rad, rad, -Math.PI / 2, 0, false);
+  sh.lineTo(hw, hh - rad);
+  sh.absarc(hw - rad, hh - rad, rad, 0, Math.PI / 2, false);
+  sh.lineTo(-hw + rad, hh);
+  sh.absarc(-hw + rad, hh - rad, rad, Math.PI / 2, Math.PI, false);
+  sh.lineTo(-hw, -hh + rad);
+  sh.absarc(-hw + rad, -hh + rad, rad, Math.PI, 1.5 * Math.PI, false);
+  return sh;
+}
+
+// Three footprint shapes only (1x1, 2x1, 1x2) — built once, shared by every block.
+const footprintGeoCache = new Map();
+
+function footprintGeo(w, h, stroked) {
+  const key = `${w}x${h}${stroked ? "s" : "f"}`;
+  const hit = footprintGeoCache.get(key);
+  if (hit) return hit;
+  const ow = w - 0.08;
+  const oh = h - 0.08;
+  const shape = roundedRectShape(ow, oh, 0.18);
+  if (stroked) {
+    const t = 0.115;
+    const inner = roundedRectShape(ow - t * 2, oh - t * 2, 0.1);
+    shape.holes.push(new THREE.Path(inner.getPoints(10)));
+  }
+  const geo = new THREE.ShapeGeometry(shape, 8);
+  geo.userData.shared = true;
+  footprintGeoCache.set(key, geo);
+  return geo;
+}
+
+const footprintOutlineGeo = (w, h) => footprintGeo(w, h, true);
+const footprintFillGeo = (w, h) => footprintGeo(w, h, false);
 
 function closeOverflow() {
   if (overflowMenu) overflowMenu.classList.add("hidden");
@@ -594,6 +834,7 @@ function buildBoard() {
 // --- Block meshes ---
 function createBlockMesh(b, colorIndex) {
   const colors = BLOCK_COLORS[colorIndex % BLOCK_COLORS.length];
+  b.colors = colors;
   const group = new THREE.Group();
   group.name = `block-${b.id}`;
   group.userData.blockId = b.id;
@@ -630,6 +871,32 @@ function createBlockMesh(b, colorIndex) {
   edges.name = "edges";
   group.add(edges);
 
+  // Selected-brick marker: a solid white inverted hull. Back faces only, so the
+  // body hides everything except a constant-width rim around the silhouette.
+  // toneMapped:false keeps it pure white through ACES tone mapping (reads on phones).
+  const outline = new THREE.Mesh(
+    new RoundedBoxGeometry(
+      0.96 + OUTLINE_PAD * 2,
+      1.96 + OUTLINE_PAD * 2,
+      0.96 + OUTLINE_PAD * 2,
+      4,
+      0.1 + OUTLINE_PAD
+    ),
+    new THREE.MeshBasicMaterial({
+      color: PALETTE.select,
+      side: THREE.BackSide,
+      toneMapped: false,
+      transparent: true,
+      opacity: 1,
+    })
+  );
+  outline.name = "outline";
+  outline.visible = false;
+  outline.castShadow = false;
+  outline.receiveShadow = false;
+  outline.raycast = () => {}; // never steal a tap from the body
+  group.add(outline);
+
   const studGroup = new THREE.Group();
   studGroup.name = "blockStuds";
   const studMat = plasticMat(colors.stud, { roughness: 0.3, clearcoat: 0.85 });
@@ -648,13 +915,14 @@ function createBlockMesh(b, colorIndex) {
   hlGroup.visible = false;
 
   const ring = new THREE.Mesh(
-    new THREE.RingGeometry(0.5, 0.78, 40),
+    footprintOutlineGeo(1, 1),
     new THREE.MeshBasicMaterial({
-      color: 0xffffff,
+      color: PALETTE.select,
       transparent: true,
       opacity: 0.95,
       side: THREE.DoubleSide,
       depthWrite: false,
+      toneMapped: false,
     })
   );
   ring.rotation.x = -Math.PI / 2;
@@ -662,7 +930,7 @@ function createBlockMesh(b, colorIndex) {
   hlGroup.add(ring);
 
   const glow = new THREE.Mesh(
-    new THREE.CircleGeometry(0.7, 32),
+    footprintFillGeo(1, 1),
     new THREE.MeshBasicMaterial({
       color: colors.edge,
       transparent: true,
@@ -721,17 +989,30 @@ function updateHighlightPos(b) {
   }
   cx /= cells.length;
   cz /= cells.length;
-  // Scale ring to footprint span (wider when flat)
-  const span = Math.max(1, cells.length);
-  b.highlight.scale.set(0.85 + span * 0.22, 1, 0.85 + span * 0.22);
+  // Swap in the outline that actually matches the footprint (1x1 / 2x1 / 1x2)
+  const w = b.orient === "flat-x" ? 2 : 1;
+  const h = b.orient === "flat-y" ? 2 : 1;
+  const ring = b.highlight.getObjectByName("ring");
+  const glow = b.highlight.getObjectByName("glow");
+  if (ring) ring.geometry = footprintOutlineGeo(w, h);
+  if (glow) glow.geometry = footprintFillGeo(w, h);
+  b.highlight.scale.set(1, 1, 1);
   b.highlight.position.set(cx, TILE_H + 0.045, cz);
+}
+
+function setOutlineVisible(b, on) {
+  if (!b.mesh) return;
+  const o = b.mesh.getObjectByName("outline");
+  if (o) o.visible = !!on;
 }
 
 function updateSelectionVisuals() {
   for (const b of blocks) {
+    const isSel = !b.sunk && b.id === selectedId;
+    setOutlineVisible(b, isSel);
     if (b.highlight) {
-      b.highlight.visible = !b.sunk && b.id === selectedId;
-      if (b.highlight.visible) updateHighlightPos(b);
+      b.highlight.visible = isSel;
+      if (isSel) updateHighlightPos(b);
     }
   }
 }
@@ -907,15 +1188,17 @@ function tryMove(dirName) {
   const from = { x: block.x, y: block.y, orient: block.orient };
   const next = roll(block, dir);
 
-  // Reject invalid: off-board / unsupported / collision / taken hole
-  if (!isSupported(next)) return;
-  if (collidesWithOthers(next, block.id)) return;
+  // Reject invalid: off-board / unsupported / collision / taken hole.
+  // Every rejection gets the same loud feedback so the rule is never a silent no-op.
+  if (!isSupported(next)) return rejectMove(block, dirName, "Blocked — no floor there");
+  if (collidesWithOthers(next, block.id)) return rejectMove(block, dirName, "Blocked — brick in the way");
   // Sweep: from∪to must not clip through another block mid-roll
-  const sweep = { x: from.x, y: from.y, orient: from.orient };
   const sweepCells = [...footprint(from), ...footprint(next)];
   const occ = occupiedCells(block.id);
-  if (sweepCells.some((ca) => occ.some((cb) => ca.x === cb.x && ca.y === cb.y))) return;
-  if (isUprightInHole(next) && holeOccupied(next.x, next.y, block.id)) return;
+  if (sweepCells.some((ca) => occ.some((cb) => ca.x === cb.x && ca.y === cb.y)))
+    return rejectMove(block, dirName, "Blocked — no room to roll");
+  if (isUprightInHole(next) && holeOccupied(next.x, next.y, block.id))
+    return rejectMove(block, dirName, "That hole is taken");
 
   moves += 1;
   updateHUD();
@@ -929,7 +1212,8 @@ function tryMove(dirName) {
     block.y = next.y;
     block.orient = next.orient;
     placeBlock(block);
-    impactPunch(block);
+    impactPunch(block, next.orient === "upright" ? 1.25 : 1);
+    haptic(next.orient === "upright" ? 16 : 10);
     assertNoOverlaps("after-roll");
 
     if (isUprightInHole(block) && !holeOccupied(block.x, block.y, block.id)) {
@@ -940,14 +1224,130 @@ function tryMove(dirName) {
   });
 }
 
+/**
+ * Rejected move: bump the brick into the wall it can't cross, red-tint its
+ * outline, buzz, red-vignette the frame and name the reason in the status line.
+ */
+function rejectMove(block, dirName, reason) {
+  setStatus(reason || "Blocked", "fail", 1200);
+  flashScreen("reject");
+  shakeStage("soft");
+  haptic([18, 30, 18]);
+  nudgeBlock(block, dirName);
+  tintRejected(block);
+}
+
+/** Short bump toward the illegal direction and back — reads as "wall". */
+function nudgeBlock(block, dirName) {
+  const dir = DIRS[dirName];
+  if (!dir || !block.mesh || block.sunk || animating) return;
+  const mesh = block.mesh;
+  if (block._nudgeFx) cancelFx(block._nudgeFx);
+  const base = poseTransform(block).position.clone();
+  const amp = 0.22;
+  block._nudgeFx = addFx(
+    NUDGE_MS,
+    (p) => {
+      if (animating || block.sunk) return;
+      const k = Math.sin(Math.PI * p) * (1 - 0.35 * p);
+      mesh.position.set(base.x + dir.dx * amp * k, base.y, base.z + dir.dy * amp * k);
+    },
+    () => {
+      block._nudgeFx = null;
+      if (!animating && !block.sunk) mesh.position.copy(base);
+    }
+  );
+}
+
+/** Flash the white outline + footprint ring red, then fade back to white. */
+function tintRejected(block) {
+  const targets = [];
+  const outline = block.mesh ? block.mesh.getObjectByName("outline") : null;
+  if (outline && outline.visible) targets.push(outline.material);
+  if (block.highlight && block.highlight.visible) {
+    const ring = block.highlight.getObjectByName("ring");
+    if (ring && ring.material) targets.push(ring.material);
+  }
+  if (!targets.length) return;
+  if (block._rejectFx) cancelFx(block._rejectFx);
+  const saved = targets.map((m) => m.color.clone());
+  block._rejectFx = addFx(
+    340,
+    (p) => {
+      const k = 1 - p;
+      targets.forEach((m, i) => m.color.copy(saved[i]).lerp(REJECT_COLOR, k));
+    },
+    () => {
+      targets.forEach((m, i) => m.color.copy(saved[i]));
+      block._rejectFx = null;
+    }
+  );
+}
+
 function sinkBlock(block) {
   block.sunk = true;
-  if (block.mesh) {
-    // Drop slightly into hole and hide
-    block.mesh.position.y = TILE_H + 0.35;
-    block.mesh.visible = false;
-  }
+  const hx = block.x;
+  const hz = block.y;
+  const colors = block.colors || BLOCK_COLORS[0];
+
   if (block.highlight) block.highlight.visible = false;
+  setOutlineVisible(block, false);
+
+  if (block.mesh) {
+    const mesh = block.mesh;
+    if (block._punchFx) cancelFx(block._punchFx);
+    if (block._nudgeFx) cancelFx(block._nudgeFx);
+    mesh.scale.set(1, 1, 1);
+    const y0 = mesh.position.y;
+    const fades = fadeTargets(block);
+    for (const t of fades) {
+      if (!t.mat.transparent) {
+        t.mat.transparent = true;
+        t.mat.needsUpdate = true; // one-time recompile; the brick is gone after this
+      }
+    }
+    addFx(
+      SINK_MS,
+      (p) => {
+        // snaps down out of the hole mouth, then the tail eases out as it fades
+        const drop = 1 - Math.pow(1 - p, 2.4);
+        mesh.position.y = y0 - drop * 2.4;
+        const k = Math.max(0, 1 - p * 1.3);
+        const sc = 0.55 + 0.45 * k;
+        mesh.scale.set(sc, sc, sc);
+        setFade(fades, k);
+      },
+      () => {
+        mesh.visible = false;
+        mesh.position.y = TILE_H + 0.35;
+        mesh.scale.set(1, 1, 1);
+        setFade(fades, 1);
+      }
+    );
+  }
+
+  // Big, phone-legible impact: twin shockwaves + coloured debris + white sparks.
+  const puffY = TILE_H + 0.25;
+  spawnShockwave(hx, hz, PALETTE.holeGlow, { from: 0.5, to: 3.6, life: 640, opacity: 1 });
+  spawnBurst(hx, puffY, hz, colors.edge, 26, {
+    life: 720,
+    spread: 2.6,
+    up: 3.2,
+    gravity: 5.6,
+    size: 0.42,
+  });
+  spawnBurst(hx, puffY, hz, 0xffffff, 14, {
+    life: 500,
+    spread: 3.4,
+    up: 1.7,
+    gravity: 4.6,
+    size: 0.26,
+  });
+  window.setTimeout(() => {
+    if (scene) spawnShockwave(hx, hz, 0xffffff, { from: 0.4, to: 2.5, life: 480, opacity: 0.85 });
+  }, 110);
+  shakeStage("soft");
+  haptic([22, 40, 30]);
 
   // Auto-select next unsunk block
   if (selectedId === block.id) {
@@ -957,7 +1357,7 @@ function sinkBlock(block) {
   updateSelectionVisuals();
   updateHUD();
   flashScreen("sink");
-  setStatus(`Sunk! ${sunkCount()}/${blocks.length}`, "info");
+  setStatus(`Sunk! ${sunkCount()}/${blocks.length}`, "info", 1600);
 }
 
 function checkWin() {
@@ -1023,7 +1423,33 @@ function easeInOut(t) {
   return t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
 }
 
+/** Tipping over: hangs at the balance point, then gravity yanks it down. */
+function easeTip(t) {
+  return t * t * (2.2 - 1.2 * t);
+}
+
+/** Standing up: needs a shove, then settles heavy onto its end. */
+function easeRise(t) {
+  const u = 1 - t;
+  return 1 - u * u * u;
+}
+
+/** Flat side roll: light, snappy, symmetric. */
+function easeSide(t) {
+  return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+}
+
+/** Duration + curve follow what the brick is physically doing. */
+function rollStyle(fromOrient, toOrient) {
+  if (fromOrient === "upright") return { ms: ROLL_MS_TIP, ease: easeTip };
+  if (toOrient === "upright") return { ms: ROLL_MS_RISE, ease: easeRise };
+  return { ms: ROLL_MS_SIDE, ease: easeSide };
+}
+
 function startRollAnim(block, from, to, dirName, onDone) {
+  // Any leftover bump / squash would fight the pivot transform
+  if (block._nudgeFx) cancelFx(block._nudgeFx);
+  if (block._punchFx) cancelFx(block._punchFx);
   block.x = from.x;
   block.y = from.y;
   block.orient = from.orient;
@@ -1047,11 +1473,13 @@ function startRollAnim(block, from, to, dirName, onDone) {
   scene.add(pivot);
   pivot.attach(block.mesh);
 
+  const style = rollStyle(from.orient, to.orient);
   anim = {
     kind: "roll",
     block,
     t0: performance.now(),
-    duration: ROLL_MS,
+    duration: style.ms,
+    ease: style.ease,
     axis: info.axis.clone(),
     angle: info.angle,
     onDone,
@@ -1061,7 +1489,7 @@ function startRollAnim(block, from, to, dirName, onDone) {
 function updateAnim(now) {
   if (!anim) return;
   const raw = Math.min(1, (now - anim.t0) / anim.duration);
-  const t = easeInOut(raw);
+  const t = (anim.ease || easeInOut)(raw);
 
   if (anim.kind === "roll" && pivot) {
     pivot.quaternion.setFromAxisAngle(anim.axis, anim.angle * t);
@@ -1106,15 +1534,24 @@ function updateTimer(now) {
 function loop(now) {
   requestAnimationFrame(loop);
   updateAnim(now);
+  updateFx(now);
   updateTimer(now);
   // Soft pulse on selected ring / glow
   const sel = blocks.find((b) => b.id === selectedId && !b.sunk && b.highlight);
   if (sel && sel.highlight) {
-    const pulse = 0.88 + 0.12 * Math.sin(now * 0.008);
+    const wave = Math.sin(now * 0.008);
+    const pulse = 0.88 + 0.12 * wave;
     const ring = sel.highlight.getObjectByName("ring");
     const glow = sel.highlight.getObjectByName("glow");
     if (ring && ring.material) ring.material.opacity = 0.75 + 0.2 * pulse;
     if (glow && glow.material) glow.material.opacity = 0.18 + 0.16 * pulse;
+    // Breathe the white shell so the selected brick is unmistakable on a small screen
+    const outline = sel.mesh ? sel.mesh.getObjectByName("outline") : null;
+    if (outline && outline.visible && outline.material) {
+      outline.material.opacity = 0.85 + 0.15 * pulse;
+      const s = 1 + 0.02 * wave;
+      outline.scale.set(s, s, s);
+    }
   }
   renderer.render(scene, camera);
 }

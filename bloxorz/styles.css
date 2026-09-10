@@ -386,3 +386,198 @@ body {
     border: 1px solid rgba(245, 197, 24, 0.2);
   }
 }
+
+/* ---------------------------------------------------------------------------
+   Feel FX — class/id hooks driven by game.js (flashScreen, shakeStage,
+   celebratePulse, wirePressFeedback). Transform/opacity only, so these stay
+   cheap on phones.
+   --------------------------------------------------------------------------- */
+
+#fx-flash {
+  position: absolute;
+  inset: 0;
+  z-index: 15;
+  pointer-events: none;
+  opacity: 0;
+  border-radius: inherit;
+  mix-blend-mode: screen;
+  will-change: opacity;
+}
+
+#fx-flash.on {
+  animation: fx-flash-fade 400ms ease-out;
+}
+
+#fx-flash.sink {
+  background: radial-gradient(
+    circle at 50% 38%,
+    rgba(150, 210, 255, 0.85),
+    rgba(30, 144, 255, 0.28) 34%,
+    transparent 58%
+  );
+}
+
+#fx-flash.win {
+  background: radial-gradient(
+    circle at 50% 38%,
+    rgba(255, 232, 140, 0.95),
+    rgba(61, 214, 140, 0.4) 44%,
+    transparent 72%
+  );
+}
+
+#fx-flash.fail {
+  background: radial-gradient(
+    circle at 50% 38%,
+    rgba(255, 120, 120, 0.9),
+    rgba(227, 28, 35, 0.45) 46%,
+    transparent 76%
+  );
+}
+
+/* Rejected move: red edge vignette instead of a full wash, so the board stays readable */
+#fx-flash.reject {
+  mix-blend-mode: normal;
+  background: rgba(255, 59, 59, 0.08);
+  box-shadow:
+    inset 0 0 0 5px rgba(255, 59, 59, 0.95),
+    inset 0 0 55px 12px rgba(255, 59, 59, 0.5);
+  animation: fx-flash-reject 280ms ease-out;
+}
+
+@keyframes fx-flash-fade {
+  0% {
+    opacity: 0;
+  }
+  16% {
+    opacity: 0.72;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes fx-flash-reject {
+  0% {
+    opacity: 0;
+  }
+  12% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+.fx-shake {
+  animation: fx-shake 440ms cubic-bezier(0.36, 0.07, 0.19, 0.97) both;
+}
+
+@keyframes fx-shake {
+  10%,
+  90% {
+    transform: translate3d(-2px, 0, 0);
+  }
+  20%,
+  80% {
+    transform: translate3d(4px, 1px, 0);
+  }
+  30%,
+  50%,
+  70% {
+    transform: translate3d(-7px, -1px, 0);
+  }
+  40%,
+  60% {
+    transform: translate3d(7px, 1px, 0);
+  }
+}
+
+.fx-shake-soft {
+  animation: fx-shake-soft 280ms ease-out both;
+}
+
+@keyframes fx-shake-soft {
+  20% {
+    transform: translate3d(-4px, 0, 0);
+  }
+  50% {
+    transform: translate3d(4px, 0, 0);
+  }
+  75% {
+    transform: translate3d(-2px, 0, 0);
+  }
+  100% {
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+.fx-celebrate {
+  animation: fx-celebrate 700ms ease-out;
+}
+
+@keyframes fx-celebrate {
+  0% {
+    filter: brightness(1) saturate(1);
+  }
+  25% {
+    filter: brightness(1.22) saturate(1.25);
+  }
+  100% {
+    filter: brightness(1) saturate(1);
+  }
+}
+
+/* Pointer-driven press state (pointerdown fires before :active on touch) */
+.btn.is-pressed {
+  transform: translateY(2px) scale(0.97);
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.35);
+  filter: brightness(1.12);
+}
+
+.dpad button.is-pressed {
+  transform: translateY(3px) scale(0.95);
+  box-shadow: 0 1px 0 #6e0c10;
+  filter: brightness(1.15);
+}
+
+/* Status line pops when it changes, so a repeated "Blocked" still registers */
+.status {
+  transition: color 120ms ease;
+}
+
+.status.fail,
+.status.info,
+.status.win {
+  animation: fx-status-pop 220ms ease-out;
+}
+
+.status.fail {
+  text-shadow: 0 0 12px rgba(255, 59, 59, 0.45);
+}
+
+@keyframes fx-status-pop {
+  0% {
+    transform: scale(0.9);
+    opacity: 0.35;
+  }
+  60% {
+    transform: scale(1.04);
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fx-shake,
+  .fx-shake-soft,
+  .fx-celebrate,
+  .status.fail,
+  .status.info,
+  .status.win,
+  #timer-label.timer.urgent {
+    animation: none !important;
+  }
+}
