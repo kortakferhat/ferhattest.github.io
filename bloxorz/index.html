@@ -62,6 +62,7 @@
             </p>
             <ul>
               <li><strong>Multiple blocks</strong> — tap or swipe the brick you want to move.</li>
+              <li><strong>One hole per brick</strong> — each hole accepts only one block; put every brick in a different hole.</li>
               <li>Upright covers 1 tile; flat covers 2. Only upright-in-hole counts as sunk.</li>
               <li><strong>No falling</strong> — moves off the board or onto empty space are rejected.</li>
               <li><strong>Timer</strong> defaults to 2:00. Timeout fails and restarts the level.</li>
@@ -77,6 +78,14 @@
           <button type="button" class="btn btn-primary" id="howto-close" style="width: 100%">
             Got it — play
           </button>
+        </div>
+      </div>
+
+      <div id="result" class="result hidden" role="dialog" aria-labelledby="result-title">
+        <div class="result-card">
+          <h2 id="result-title"></h2>
+          <p id="result-sub"></p>
+          <button type="button" class="btn btn-primary" id="result-cta"></button>
         </div>
       </div>
     </div>
